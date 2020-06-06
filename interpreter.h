@@ -1,3 +1,9 @@
+#include "value.h"
+#include "linkedlist.h"
+#include "talloc.h"
+#include "parser.h"
+#include "tokenizer.h"
+
 #ifndef _INTERPRETER
 #define _INTERPRETER
 
