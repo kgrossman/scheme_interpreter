@@ -18,6 +18,7 @@ Value *evalIf(Value *args, Frame *frame);
 Value *evalLet(Value *args, Frame *frame);
 Value *evalLetStar(Value *args, Frame *frame);
 Value *evalLetrec(Value *args, Frame *frame);
+Value *evalCond(Value *args, Frame *frame);
 Value *evalBegin(Value *args, Frame *frame);
 Value *evalSetBang(Value *args, Frame *frame);
 Value *evalLambda(Value *args, Frame *frame);
@@ -26,6 +27,10 @@ Value *lookUpSymbol(Value *tree, Frame *frame);
 void bind(char *name, Value *(*function)(struct Value *), Frame *frame);
 Value *or(Value *args, Frame *frame);
 Value *and(Value *args, Frame *frame);
+Value *primitiveMultiply(Value *args);
+Value *primitiveDivide(Value *args);
+Value *primitiveModulo(Value *args);
+bool isInteger(double num);
 Value *primitiveAdd(Value *args);
 Value *primitiveMinus(Value *args);
 Value *primitiveLessThan(Value *args);
@@ -51,6 +56,9 @@ void interpret(Value *tree) {
   bind("<", primitiveLessThan, frame);
   bind(">", primitiveGreaterThan, frame);
   bind("=", primitiveEquals, frame);
+  bind("*", primitiveMultiply, frame);
+  bind("/", primitiveDivide, frame);
+  bind("modulo", primitiveModulo, frame);
   bind("null?", primitiveNull, frame);
   bind("car", primitiveCar, frame);
   bind("cdr", primitiveCdr, frame);
@@ -103,6 +111,10 @@ Value *eval(Value *tree, Frame *frame) {
 
         if (!strcmp(first->s,"letrec")) {
           return evalLetrec(args,frame);
+        }
+
+        if (!strcmp(first->s,"cond")) {
+          return evalCond(args,frame);
         }
 
         if (!strcmp(first->s,"set!")) {
@@ -168,6 +180,139 @@ void bind(char *name, Value *(*function)(struct Value *), Frame *frame) {
   frame->bindings = cons(cons(funcName, v), frame->bindings);
 }
 
+Value *evalCond(Value *args, Frame *frame) {
+  
+  Value *curArg = args;
+
+  while (curArg->type != NULL_TYPE) {
+    if (car(car(curArg))->type == SYMBOL_TYPE && !strcmp(car(car(curArg))->s, "else")) {
+      return eval(car(cdr(car(curArg))), frame);
+    }
+    if (eval(car(car(curArg)), frame)->i) {
+      return eval(car(cdr(car(curArg))), frame);
+    }
+    curArg = cdr(curArg);
+  }
+
+  return makeNull();
+}
+
+//assumes args are ints
+Value *primitiveModulo(Value *args) {
+
+  Value *result = talloc(sizeof(Value));
+  result->type = INT_TYPE;
+
+  if (args->type == NULL_TYPE) {
+    evaluationError("no args given in /");
+  }
+  if (cdr(cdr(args))->type != NULL_TYPE) {
+    evaluationError("too many args in /");
+  }
+
+  int dividend = car(args)->i;
+  int divisor = car(cdr(args))->i;
+
+  result->i = dividend % divisor;
+
+  return result;
+}
+
+Value *primitiveDivide(Value *args) {
+  
+  Value *result = talloc(sizeof(Value));
+
+  if (args->type == NULL_TYPE) {
+    evaluationError("no args given in /");
+  }
+  if (cdr(cdr(args))->type != NULL_TYPE) {
+    evaluationError("too many args in /");
+  }
+
+  double quotient;
+  double dividend;
+  double divisor;
+
+  if (car(args)->type == INT_TYPE) {
+    dividend = (double) car(args)->i;
+  }
+  else if (car(args)->type == DOUBLE_TYPE) {
+    dividend = car(args)->d;
+  }
+  else {
+    evaluationError("nonnumerical arg in /");
+  }
+  
+  if (car(cdr(args))->type == INT_TYPE) {
+    divisor = (double) car(cdr(args))->i;
+  }
+  else if (car(cdr(args))->type == DOUBLE_TYPE) {
+    divisor = car(cdr(args))->d;
+  }
+  else {
+    evaluationError("nonnumerical arg in /");
+  }
+
+  quotient = dividend / divisor;
+
+  if (isInteger(quotient)) {
+    result->type = INT_TYPE;
+    result->i = (int) quotient;
+  }
+  else {
+    result->type = DOUBLE_TYPE;
+    result->d = quotient;
+  }
+
+  return result;
+}
+
+bool isInteger(double num) {
+  int truncated = (int) num;
+  return (num == truncated);
+}
+
+Value *primitiveMultiply(Value *args) {
+  
+  Value *result = talloc(sizeof(Value));
+  
+  if (args->type == NULL_TYPE) {
+    result->type = INT_TYPE;
+    result->i = 1;
+    return result;
+  }
+
+  bool containsReal = false;
+  Value *curArg = args;
+
+  double product = 1;
+  
+  while (curArg->type != NULL_TYPE) {
+    if (car(curArg)->type == DOUBLE_TYPE) {
+      containsReal = true;
+      product *= car(curArg)->d;
+    }
+    else if (car(curArg)->type == INT_TYPE) {
+      product *= car(curArg)->i;
+    }
+    else {
+      evaluationError("nonnumerical argument in *");
+    }
+    curArg = cdr(curArg);
+  }
+
+  if (containsReal) {
+    result->type = DOUBLE_TYPE;
+    result->d = product;
+  }
+  else {
+    result->type = INT_TYPE;
+    result->i = (int) product;
+  }
+
+  return result;
+}
+
 Value *evalBegin(Value *args, Frame *frame) {
   
   Value *curArg = args;
@@ -228,12 +373,6 @@ Value *evalSetBang(Value *args, Frame *frame) {
 }
 
 Value *evalLetrec(Value *args, Frame *frame) {
-   /*
-   (let ((var UNSPECFIED) ...)
-   (let ((temp expr) ...)
-    (set! var temp) ...
-    (let () body1 body2 ...)))
-    */
 
   Frame *newFrame = talloc(sizeof(Frame));
   newFrame->parent = frame;
